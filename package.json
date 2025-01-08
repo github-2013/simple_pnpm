@@ -18,6 +18,9 @@
     "pnpm",
     "minimal pnpm"
   ],
+  "scripts": {
+    "dev": "node ./src/index.js"
+  },
   "license": "MIT",
   "repository": "https://github.com/milahu/npm-install-only",
   "dependencies": {
