@@ -2,12 +2,6 @@
 
 const startTime = Date.now();
 
-// add resolved + integrity fields
-// https://github.com/snyk/nodejs-lockfile-parser/pull/112
-// https://github.com/snyk/nodejs-lockfile-parser/pull/199
-
-// note: there is no parseNpmLockV3Project
-
 import { buildDepTree, parseNpmLockV2Project, LockfileType } from 'snyk-nodejs-lockfile-parser';
 
 import which from 'which';
@@ -16,16 +10,12 @@ import fs from 'fs';
 import child_process from 'child_process';
 import path from 'path';
 
-const enableDebug = false;
-
-const debug = enableDebug ? console.log : () => null;
-
 const read = filePath => fs.readFileSync(filePath, 'utf8');
 
 const json = filePath => JSON.parse(read(filePath));
 
 const mkdir = filePath => {
-  enableDebug && debug(`mkdir: ${filePath}`);
+  console.log(`mkdir: ${filePath}`);
   fs.mkdirSync(filePath, { recursive: true });
 };
 
@@ -45,16 +35,11 @@ const unpack = (archive, to) => {
   ]);
 };
 
-// FIXME: rewriting symlink /nix/store/47zfvc53hvjmjnvvylxwqj7b8njk9r4v-manyverse-0.2307.3-beta-node-modules/bin to be relative to /nix/store/47zfvc53hvjmjnvvylxwqj7b8njk9r4v-manyverse-0.2307.3-beta-node-modules
-// all internal symlinks (with targets in the node-modules derivation) should be relative
-
 const symlink = (linkTarget, linkPath) => {
-  enableDebug && debug(`symlink(${linkTarget}, ${linkPath})`);
+  console.log(`symlink(${linkTarget}, ${linkPath})`);
   mkdir(path.dirname(linkPath));
   fs.symlinkSync(linkTarget, linkPath);
 };
-
-
 
 function parseShebang(fileText) {
   // parse shebang line of script file
@@ -75,8 +60,6 @@ function parseShebang(fileText) {
   const [_, arg0, args] = shebang;
   return [arg0, args];
 }
-
-
 
 async function getDepgraph(packagePath, lockfilePath) {
   const depgraph = await parseNpmLockV2Project(
@@ -117,10 +100,9 @@ async function getDepgraph(packagePath, lockfilePath) {
     const isRootPkg = depPath.length == 0
 
     // 获取当前包的节点
-    const node = (isRootPkg
+    const node = isRootPkg
       ? depgraphData.graph.nodes[0]
       : depgraphData.nodesById[depPath[depPath.length - 1].nameVersion]
-    )
 
     // 获取当前包的依赖信息
     const dep = isRootPkg ? {
@@ -135,17 +117,15 @@ async function getDepgraph(packagePath, lockfilePath) {
     if (isRootPkg) depPath[0] = dep;
 
     async function recurse() {
-
       // 获取当前包的依赖信息
       for (const {nodeId: childNodeId} of node.deps) {
 
-        enableDebug && debug(`walk_depgraph: recurse: depPath: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
+        console.log(`walk_depgraph: recurse: depPath: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
 
         if (depPath.find(d => d.nameVersion == childNodeId)) {
           //enableDebug && debug(`found cycle in graph: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
           continue
         }
-        //enableDebug && debug(`no cycle in graph: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
 
         // 获取当前包的版本
         const version = childNodeId.replace(/.*@/, '')
@@ -179,12 +159,8 @@ async function getDepgraph(packagePath, lockfilePath) {
   ]
 }
 
-
-
 async function getDeptree(lockfilePath) {
-
   // https://github.com/snyk/nodejs-lockfile-parser/blob/master/lib/index.ts
-
   const deptree = await buildDepTree(
     read('package.json'),
     read(lockfilePath),
@@ -195,11 +171,6 @@ async function getDeptree(lockfilePath) {
   );
 
   async function walk_deptree(_this, enter, _seen, depPath = []) {
-    /* this would deduplicate
-    if (!_seen) { _seen = new Set() }
-    if (_seen.has(_this)) { return }
-    _seen.add(_this)
-    */
     async function recurse() {
       for (let key in _this.dependencies) {
         if (depPath.find(d => d.name == key)) {
@@ -233,28 +204,12 @@ const lockfileTypeOfName = {
 const TestPkgPath = './src/test_materials/package.json'
 const TestPkgLockPath = './src/test_materials/package-lock.json'
 const TestPkgMinimistTarPath = './src/test_materials/minimist-1.2.4.tgz'
+
 async function main() {
   const pkg = json(TestPkgPath);
   const pkgLock = json(TestPkgLockPath);
   const pkgNameVersion = `${pkg.name}@${pkg.version}`;
   console.log(`${pkgNameVersion}: install NPM dependencies`)
-
-
-  // npm lockfile version 2 ist not supported by the deptree API
-  // so we must use the depgraph API
-
-  // https://github.com/snyk/nodejs-lockfile-parser
-  //
-  // Dep graph generation supported for:
-  //
-  // - package-lock.json (at Versions 2 and 3)
-  // - yarn.lock
-  //
-  // Legacy dep tree supported for:
-  //
-  // - package-lock.json
-  // - yarn 1 yarn.lock
-  // - yarn 2 yarn.lock
 
   const [deps, walk_deps] = (
     pkgLock.lockfileVersion == 3 ? await getDepgraph(TestPkgPath, TestPkgLockPath) :
@@ -262,10 +217,6 @@ async function main() {
     pkgLock.lockfileVersion == 1 ? await getDeptree(TestPkgPath, TestPkgLockPath) :
     [null, null]
   )
-
-  if (deps == null && walk_deps == null) {
-    throw new Error('failed to recognize the lockfile type');
-  }
 
   const store_dir = '.pnpm';
   const doneUnpack = new Set();
@@ -275,16 +226,12 @@ async function main() {
   const showTicks = false;
 
   async function enter(dep, recurse, depPath) {
-
-    // npmlock2nix will filter optional dependencies by cpu and kernel.
-    // removed dependencies have an empty object in the lockfile
-    // so version, resolved, integrity are empty strings
     if (
       dep.version == '' &&
       dep.resolved == '' &&
       dep.nameVersion != 'package.json@' // v3
     ) {
-      enableDebug && debug(`${dep.name}: optional dependency was removed from lockfile`);
+      console.log(`${dep.name}: optional dependency was removed from lockfile`);
       return;
     }
 
@@ -317,7 +264,6 @@ async function main() {
       // nixpkgs would move the original binary (original-name) to .original-name.wrapped
       // fix: sh: line 1: /build/node_modules/.bin/patch-package: cannot execute: required file not found
       // fix: sh: line 1: /build/node_modules/.bin/husky: Permission denied
-
       const binNameList = fs.existsSync('node_modules/.bin') ? fs.readdirSync('node_modules/.bin') : [];
 
       (binNameList.length > 0) && console.log(`${dep.nameVersion}: patching binaries in node_modules/.bin/`);
@@ -480,12 +426,11 @@ async function main() {
     // nameVersionStore: in the first level of store_dir, all names are escaped
     dep.nameVersionStore = dep.nameVersion.replace(/[/]/g, '+'); // escape / with + like pnpm
 
-    const dep_path = (isRootDep
+    const dep_path = isRootDep
       // create link node_modules/x with target node_modules/.pnpm/x@1/node_modules/x
       ? `node_modules/${dep.name}`
       // create link node_modules/.pnpm/parent@1/node_modules/x with target ../../x@1/node_modules/x
       : `node_modules/${store_dir}/${parent.nameVersionStore}/node_modules/${dep.name}`
-    );
 
     dep.nameEscaped = dep.name.replace(/[/]/g, '+'); // escape / with + like pnpm
 
@@ -509,8 +454,7 @@ async function main() {
         throw new Error(`invalid tarfile path '${tgzpath}' - expected file:///*.tgz`)
       }
       unpack(tgzpath, dep_store);
-    }
-    else {
+    } else {
       // dep.resolved is directory -> create symlink
       if (dep.resolved[0] != '/' ) {
         console.dir({ dep });
@@ -521,17 +465,19 @@ async function main() {
       }
 
       // create link from machine-level store to local .pnpm/ store
+      // 依赖包文件不存在时
       if (!fs.existsSync(dep_store)) {
         symlink(dep.resolved, dep_store);
       }
     }
+    // 加入到已解压包集合中
     doneUnpack.add(dep.nameVersion);
 
     // install nested dep
+    // 依赖包文件不存在时
     if (!fs.existsSync(dep_path)) {
       symlink(dep_target, dep_path);
-    }
-    else {
+    } else {
       // symlink exists
       const old_target = fs.readlinkSync(dep_path);
       if (old_target != dep_target) {
@@ -614,7 +560,7 @@ async function main() {
     // run lifecycle scripts of dependency
     // run scripts after recurse, so that child-dependencies are installed
     if (doneScripts.has(dep.nameVersion)) {
-      enableDebug && debug(`already done scripts: ${dep.name}@${dep.version}`);
+      console.log(`already done scripts: ${dep.name}@${dep.version}`);
     }
     else {
       const dep_pkg = json(`${dep_store}/package.json`);
