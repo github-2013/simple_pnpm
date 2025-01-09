@@ -10,6 +10,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "minimist": "^1.2.8"
+    "proxy-from-env": "^1.1.0"
   }
 }

@@ -5,7 +5,6 @@ const startTime = Date.now();
 import { buildDepTree, parseNpmLockV2Project, LockfileType } from 'snyk-nodejs-lockfile-parser';
 
 import which from 'which';
-
 import fs from 'fs';
 import child_process from 'child_process';
 import path from 'path';
@@ -36,7 +35,7 @@ const unpack = (archive, to) => {
 };
 
 const symlink = (linkTarget, linkPath) => {
-  console.log(`symlink(${linkTarget}, ${linkPath})`);
+  console.log(`symlink '${linkTarget}' to '${linkPath}'`);
   mkdir(path.dirname(linkPath));
   fs.symlinkSync(linkTarget, linkPath);
 };
@@ -203,7 +202,7 @@ const lockfileTypeOfName = {
 
 const TestPkgPath = './src/test_materials/package.json'
 const TestPkgLockPath = './src/test_materials/package-lock.json'
-const TestPkgMinimistTarPath = './src/test_materials/minimist-1.2.4.tgz'
+const TestPkgMinimistTarPath = './src/test_materials/proxy-from-env-1.1.0.tgz'
 
 async function main() {
   const pkg = json(TestPkgPath);
@@ -444,39 +443,37 @@ async function main() {
     const dep_store = `node_modules/${store_dir}/${dep.nameVersionStore}/node_modules/${dep.name}`;
 
     // dep.resolved is tarfile or directory
-    // this is used in npmlock2nix, so all dep.resolved should start with file:///nix/store/ or /nix/store/
-    // invalid paths start with https:// or git+ssh:// or ...
     if (dep.resolved.startsWith("file://")) {
       // dep.resolved is tarfile -> unpack
       const tgzpath = dep.resolved.replace(/^file:\/\//, '');
       if (tgzpath[0] != '/' ) {
-        console.dir({ dep });
         throw new Error(`invalid tarfile path '${tgzpath}' - expected file:///*.tgz`)
       }
       unpack(tgzpath, dep_store);
     } else {
       // dep.resolved is directory -> create symlink
       if (dep.resolved[0] != '/' ) {
-        console.dir({ dep });
         // throw new Error(`invalid directory path '${dep.resolved}' - expected /*`);
-        if (dep.resolved === 'https://mirrors.tencent.com/npm/minimist/-/minimist-1.2.8.tgz') {
-          unpack(TestPkgMinimistTarPath, dep_store);
+        if (dep.resolved === 'https://mirrors.tencent.com/npm/proxy-from-env/-/proxy-from-env-1.1.0.tgz') {
+          unpack(TestPkgMinimistTarPath, dep_target);
         }
       }
 
       // create link from machine-level store to local .pnpm/ store
-      // 依赖包文件不存在时
       if (!fs.existsSync(dep_store)) {
-        symlink(dep.resolved, dep_store);
+        // symlink(dep.resolved, dep_store);
+        if (dep.resolved === 'https://mirrors.tencent.com/npm/proxy-from-env/-/proxy-from-env-1.1.0.tgz') {
+          symlink(dep_target, dep_store);
+        }
       }
     }
     // 加入到已解压包集合中
     doneUnpack.add(dep.nameVersion);
 
     // install nested dep
-    // 依赖包文件不存在时
     if (!fs.existsSync(dep_path)) {
-      symlink(dep_target, dep_path);
+      // symlink(dep_target, dep_path);
+      symlink(dep_store, dep_path);
     } else {
       // symlink exists
       const old_target = fs.readlinkSync(dep_path);
@@ -491,8 +488,10 @@ async function main() {
 
     if (isRootDep) {
       // install binaries. for this we must read the dep's package.json
-      const dep_store_rel = `../${store_dir}/${dep.nameVersionStore}/node_modules/${dep.name}`
-      const pkg = json(`${dep_store}/package.json`);
+      // const dep_store_rel = `../${store_dir}/${dep.nameVersionStore}/node_modules/${dep.name}`
+      const dep_store_rel = `${store_dir}/${dep.nameVersionStore}/node_modules/${dep.name}`
+      // const pkg = json(`${dep_store}/package.json`);
+      const pkg = json(`${dep_target}/package.json`);
       const deep_dir = `node_modules/${store_dir}/${dep.nameVersionStore}/node_modules/${dep.name}`;
 
       if (typeof pkg.bin == 'string') {
@@ -537,7 +536,8 @@ async function main() {
 
     // FIXME read preInstallLinks from file
     //console.dir({ loc: 390, preInstallLinks });
-
+    /*
+    暂时注释
     if (preInstallLinks != null && dep.name in preInstallLinks) {
       // symlink files from /nix/store
       for (const linkPath in preInstallLinks[dep.name]) {
@@ -556,14 +556,15 @@ async function main() {
         }
       }
     }
+    */
 
     // run lifecycle scripts of dependency
     // run scripts after recurse, so that child-dependencies are installed
     if (doneScripts.has(dep.nameVersion)) {
       console.log(`already done scripts: ${dep.name}@${dep.version}`);
-    }
-    else {
-      const dep_pkg = json(`${dep_store}/package.json`);
+    } else {
+      // const dep_pkg = json(`${dep_store}/package.json`);
+      const dep_pkg = json(`${dep_target}/package.json`);
       if (ignoreScripts == false && dep_pkg.scripts) {
         for (const scriptName of ['preinstall', 'install', 'postinstall']) {
           if (!(scriptName in dep_pkg.scripts)) {
