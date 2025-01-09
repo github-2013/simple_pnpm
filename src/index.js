@@ -14,7 +14,6 @@ const read = filePath => fs.readFileSync(filePath, 'utf8');
 const json = filePath => JSON.parse(read(filePath));
 
 const mkdir = filePath => {
-  console.log(`mkdir: ${filePath}`);
   fs.mkdirSync(filePath, { recursive: true });
 };
 
@@ -35,7 +34,7 @@ const unpack = (archive, to) => {
 };
 
 const symlink = (linkTarget, linkPath) => {
-  console.log(`symlink '${linkTarget}' to '${linkPath}'`);
+  console.log(`symlink: ${linkTarget} -> ${linkPath}`);
   mkdir(path.dirname(linkPath));
   fs.symlinkSync(linkTarget, linkPath);
 };
@@ -118,9 +117,6 @@ async function getDepgraph(packagePath, lockfilePath) {
     async function recurse() {
       // 获取当前包的依赖信息
       for (const {nodeId: childNodeId} of node.deps) {
-
-        console.log(`walk_depgraph: recurse: depPath: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
-
         if (depPath.find(d => d.nameVersion == childNodeId)) {
           //enableDebug && debug(`found cycle in graph: ${depPath.map(d => d.nameVersion).join('  ')}  ${childNodeId}`)
           continue
@@ -290,9 +286,11 @@ async function main() {
 
         const linkTargetParts = linkTarget.split("/node_modules/");
 
-        const pkgStoreName = linkTargetParts[0].split("/")[2];
+        // const pkgStoreName = linkTargetParts[0].split("/")[2];
+        const pkgStoreName = linkTargetParts[0].split("/")[1];
 
-        const pkgName = (linkTargetParts[1][0] == "@") ? linkTargetParts[1].split("/").slice(0, 2).join("/") : linkTargetParts[1].split("/")[0];
+        // const pkgName = (linkTargetParts[1][0] == "@") ? linkTargetParts[1].split("/").slice(0, 2).join("/") : linkTargetParts[1].split("/")[0];
+        const pkgName = pkgStoreName
 
         const linkTargetClean = linkTarget.replace(/\/(?:\.\/)+/g, "/"); // replace /./ with /
 
@@ -463,7 +461,9 @@ async function main() {
       if (!fs.existsSync(dep_store)) {
         // symlink(dep.resolved, dep_store);
         if (dep.resolved === 'https://mirrors.tencent.com/npm/proxy-from-env/-/proxy-from-env-1.1.0.tgz') {
-          symlink(dep_target, dep_store);
+          if (!fs.lstatSync(dep_store).isSymbolicLink) {
+            symlink(dep_target, dep_store);
+          }
         }
       }
     }
@@ -473,7 +473,9 @@ async function main() {
     // install nested dep
     if (!fs.existsSync(dep_path)) {
       // symlink(dep_target, dep_path);
-      symlink(dep_store, dep_path);
+      if (!fs.lstatSync(dep_path).isSymbolicLink) {
+        symlink(dep_store, dep_path);
+      }
     } else {
       // symlink exists
       const old_target = fs.readlinkSync(dep_path);
